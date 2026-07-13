@@ -17,8 +17,6 @@
 # TODO: Test in original-awk:
 #       https://aur.archlinux.org/packages/original-awk
 #       https://sources.debian.org/src/original-awk/
-# TODO: Adjust how many items in the legend are printed based on the terminal width.
-#
 # TODO: Handle when a single message is spread over multiple lines. Specially,
 # like in this case: https://bitbucket.org/denilsonsa/small_scripts/issue/5
 #
@@ -422,41 +420,79 @@ function lost_a_packet() {
 ############################################################
 # Functions related to printing the fancy ping response
 
-# block_index, n, w are just local variables.
-function print_response_legend(i, n, w) {
+# i, w, step, nidx, k are just local variables.
+# label and idx are used as local arrays (extra args are local in awk).
+function print_response_legend(i, w, step, nidx, k, label, idx) {
 	if ( ! '"${USE_LEGEND}"' ) {
 		return
 	}
-	if ( BLOCK_LEN > 1 ) {
-		# w counts the cursor position in the current line. Because of the
-		# escape codes, I need to jump through some hoops in order to count the
-		# position correctly.
-		w = 0
-		n = "0 "
-		w += length(n) + 1
-
-		printf( n BLOCK[0] ESC_DEFAULT )
-
-		for ( i=1 ; i<BLOCK_LEN ; i++ ) {
-			n = sprintf( "%d ", BLOCK_RTT_MIN + ceil((i-1) * BLOCK_RTT_RANGE / (BLOCK_LEN - 2)) )
-			w += length(n) + 1
-
-			# Avoid breaking the legend at the end of the line.
-			# Also avoids a background color change right at
-			# the edge of the screen. (If it happens, the entire next line
-			# will have that background color, which is not desired.)
-			if ( '"${IS_TERMINAL}"' && w + 1 >= COLUMNS ) {
-				printf( "\n" )
-				w = length(n) + 1
-			} else {
-				printf( " " )
-				w += 1
-			}
-
-			printf( n BLOCK[i] ESC_DEFAULT )
-		}
-		printf( " ∞\n" )
+	if ( BLOCK_LEN <= 1 ) {
+		return
 	}
+
+	# Precompute the RTT threshold label printed before each block glyph.
+	label[0] = "0 "
+	for ( i=1 ; i<BLOCK_LEN ; i++ ) {
+		label[i] = sprintf( "%d ", BLOCK_RTT_MIN + ceil((i-1) * BLOCK_RTT_RANGE / (BLOCK_LEN - 2)) )
+	}
+
+	# On a terminal, skip some legend items so the whole legend fits on a
+	# single line instead of wrapping onto several. step==1 shows every item,
+	# step==2 every other item, and so on. The first item (0) and the last
+	# item are always shown, so the full RTT range stays visible.
+	#
+	# idx[] holds the list of block indices to actually print, and nidx its
+	# length.
+	if ( '"${IS_TERMINAL}"' ) {
+		for ( step=1 ; step < BLOCK_LEN - 1 ; step++ ) {
+			# Build the candidate list of indices for this step.
+			nidx = 0
+			idx[nidx++] = 0
+			for ( i=step ; i < BLOCK_LEN - 1 ; i+=step ) {
+				idx[nidx++] = i
+			}
+			idx[nidx++] = BLOCK_LEN - 1
+
+			# Measure how wide this list would be. The first item is its
+			# label plus one glyph column; every later item adds a separating
+			# space, its label and one glyph; and the line ends with " ∞".
+			w = length(label[idx[0]]) + 1
+			for ( k=1 ; k<nidx ; k++ ) {
+				w += 1 + length(label[idx[k]]) + 1
+			}
+			w += 2
+
+			if ( w < COLUMNS ) {
+				break
+			}
+		}
+	} else {
+		# Not a terminal (piped to a file or pager): show every item.
+		nidx = 0
+		for ( i=0 ; i<BLOCK_LEN ; i++ ) {
+			idx[nidx++] = i
+		}
+	}
+
+	# Print the selected legend items. The per-item line wrap is kept as a
+	# safety net for terminals too narrow to fit even the reduced legend.
+	# Wrapping mid-legend also avoids a background color change right at the
+	# edge of the screen, which would otherwise bleed into the next line.
+	printf( label[idx[0]] BLOCK[idx[0]] ESC_DEFAULT )
+	w = length(label[idx[0]]) + 1
+	for ( k=1 ; k<nidx ; k++ ) {
+		i = idx[k]
+		w += length(label[i]) + 1
+		if ( '"${IS_TERMINAL}"' && w + 1 >= COLUMNS ) {
+			printf( "\n" )
+			w = length(label[i]) + 1
+		} else {
+			printf( " " )
+			w += 1
+		}
+		printf( label[i] BLOCK[i] ESC_DEFAULT )
+	}
+	printf( " ∞\n" )
 
 	# Useful code for debugging.
 	#for ( i=0 ; i<=BLOCK_RTT_MAX ; i++ ) {
