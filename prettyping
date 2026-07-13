@@ -20,9 +20,6 @@
 # TODO: Handle when a single message is spread over multiple lines. Specially,
 # like in this case: https://bitbucket.org/denilsonsa/small_scripts/issue/5
 #
-# TODO: Print the destination (also) at the bottom bar. Useful after leaving
-# the script running for quite some time.
-#
 # TODO: Print the destination as escape codes to xterm title.
 #
 # TODO: Print the current time in the beginning of each line.
@@ -550,6 +547,12 @@ function print_global_stats(percentage_lost, avg_rtt) {
 			avg_rtt,
 			max_rtt )
 	}
+
+	# Also show the destination, useful after the script has been running
+	# long enough for the ping header line to scroll off the screen.
+	if ( dest != "" ) {
+		printf( " (%s)", dest )
+	}
 }
 
 # All arguments are just local variables.
@@ -639,6 +642,10 @@ BEGIN {
 	# The previously printed non-ping-response line
 	other_line = ""
 	other_line_times = 0
+
+	# The ping destination, captured from the ping header line so it can be
+	# shown in the statistics bar after the header has scrolled off.
+	dest = ""
 
 	# Variables to keep the screen clean
 	IS_PRINTING_DOTS = 0
@@ -911,6 +918,16 @@ BEGIN {
 	} else {
 		other_line_is_printed()
 		original_line = $0
+		if ( dest == "" && $0 ~ /^PING/ ) {
+			# The header line printed by ping, e.g.:
+			#   PING 1.1.1.1 (1.1.1.1): 56 data bytes
+			#   PING google.com (142.250.80.14): 56 data bytes
+			# Remember the destination (the target as typed) for the
+			# statistics bar. The line still prints normally below.
+			dest = original_line
+			sub( /^PING /, "", dest )
+			sub( /[ :].*/, "", dest )
+		}
 		gsub(/icmp_seq[= ][0-9]+/, "")
 		if ( $0 == other_line ) {
 			other_line_times++
