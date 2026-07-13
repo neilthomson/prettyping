@@ -1,0 +1,11 @@
+# General
+.DS_Store
+.localized
+__MACOSX/
+.AppleDouble
+.LSOverride
+Icon[]
+
+# Claude
+.claude
+CLAUDE.md
