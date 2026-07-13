@@ -714,6 +714,11 @@ BEGIN {
 	ESC_SAVEPOS      = "\0337"
 	ESC_UNSAVEPOS    = "\0338"
 
+	# Set the xterm window/icon title: a prefix, the title text, then the
+	# terminator (BEL).
+	ESC_TITLE_START  = "\033]0;"
+	ESC_TITLE_END    = "\007"
+
 	# I am avoiding these escapes as they are not listed in:
 	# https://vt100.net/docs/vt100-ug/chapter3.html
 	#ESC_PREVLINE   = "\033[F"
@@ -927,6 +932,11 @@ BEGIN {
 			dest = original_line
 			sub( /^PING /, "", dest )
 			sub( /[ :].*/, "", dest )
+
+			# Also advertise the destination in the terminal (xterm) title.
+			if ( '"${IS_TERMINAL}"' ) {
+				printf( ESC_TITLE_START "prettyping " dest ESC_TITLE_END )
+			}
 		}
 		gsub(/icmp_seq[= ][0-9]+/, "")
 		if ( $0 == other_line ) {
