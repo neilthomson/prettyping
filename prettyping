@@ -283,6 +283,40 @@ function get_terminal_size(SIZE, SIZEA, HAS_DETECTED, CMD) {
 ############################################################
 # Functions related to cursor handling
 
+# Prints a non-ping-response line, collapsing consecutive repeats just like
+# ping responses collapse into the dot ticker.
+function handle_other_line() {
+	other_line_is_printed()
+	original_line = $0
+	if ( dest == "" && $0 ~ /^PING/ ) {
+		# The header line printed by ping, e.g.:
+		#   PING 1.1.1.1 (1.1.1.1): 56 data bytes
+		#   PING google.com (142.250.80.14): 56 data bytes
+		# Remember the destination (the target as typed) for the
+		# statistics bar. The line still prints normally below.
+		dest = original_line
+		sub( /^PING /, "", dest )
+		sub( /[ :].*/, "", dest )
+
+		# Also advertise the destination in the terminal (xterm) title.
+		if ( '"${IS_TERMINAL}"' ) {
+			printf( ESC_TITLE_START "prettyping " dest ESC_TITLE_END )
+		}
+	}
+	gsub(/icmp_seq[= ][0-9]+/, "")
+	if ( $0 == other_line ) {
+		other_line_times++
+		if ( '"${IS_TERMINAL}"' ) {
+			other_line_is_repeated()
+		}
+	} else {
+		other_line_finished_repeating()
+		other_line = $0
+		other_line_times = 1
+		printf( "%s\n", original_line )
+	}
+}
+
 # Function called whenever a non-dotted line is printed.
 #
 # It will move the cursor to the line next to the statistics and
@@ -643,6 +677,11 @@ BEGIN {
 	other_line = ""
 	other_line_times = 0
 
+	# Number of upcoming lines to silently discard. Used to swallow the
+	# IP-header dump that macOS/BSD ping prints after an ICMP error
+	# notification (e.g. "Destination Net Unreachable").
+	SWALLOW_LINES = 0
+
 	# The ping destination, captured from the ping header line so it can be
 	# shown in the statistics bar after the header has scrolled off.
 	dest = ""
@@ -810,6 +849,13 @@ BEGIN {
 ############################################################
 # Main loop
 {
+	if ( SWALLOW_LINES > 0 ) {
+		# Discarding the IP-header dump that follows an ICMP error
+		# notification, see the "bytes from" branch below.
+		SWALLOW_LINES--
+		next
+	}
+
 	if ( $0 ~ /^[0-9]+ bytes from .*[:,] icmp_[rs]eq=[0-9]+ (ttl|hlim)=[0-9]+ time=[0-9.]+ *ms/ ) {
 		# Sample line from ping:
 		# 64 bytes from 8.8.8.8: icmp_seq=1 ttl=49 time=184 ms
@@ -888,6 +934,16 @@ BEGIN {
 		# matching "Request timeout for icmp_seq N" line, which is handled
 		# below and already counts the loss, so we ignore this noisy
 		# duplicate to keep the output clean.
+	} else if ( $0 ~ /^[0-9]+ bytes from .*: .+/ ) {
+		# An ICMP error was received instead of an echo reply, e.g.:
+		#   92 bytes from 10.23.77.85: Destination Net Unreachable
+		# On macOS/BSD ping, this line is always followed by two more
+		# lines dumping the original IP header (the "Vr HL TOS ..."
+		# table and its data row). Those two lines are pure noise for a
+		# live ping monitor and would otherwise each break the compact
+		# ticker onto a new line, so swallow them.
+		SWALLOW_LINES = 2
+		handle_other_line()
 	} else if ( $0 ~ /^Request timeout for icmp_seq [0-9]+/ ) {
 		# Reply timeout is printed on Mac OS X.
 
@@ -921,35 +977,7 @@ BEGIN {
 			print_statistics_bar_if_terminal()
 		}
 	} else {
-		other_line_is_printed()
-		original_line = $0
-		if ( dest == "" && $0 ~ /^PING/ ) {
-			# The header line printed by ping, e.g.:
-			#   PING 1.1.1.1 (1.1.1.1): 56 data bytes
-			#   PING google.com (142.250.80.14): 56 data bytes
-			# Remember the destination (the target as typed) for the
-			# statistics bar. The line still prints normally below.
-			dest = original_line
-			sub( /^PING /, "", dest )
-			sub( /[ :].*/, "", dest )
-
-			# Also advertise the destination in the terminal (xterm) title.
-			if ( '"${IS_TERMINAL}"' ) {
-				printf( ESC_TITLE_START "prettyping " dest ESC_TITLE_END )
-			}
-		}
-		gsub(/icmp_seq[= ][0-9]+/, "")
-		if ( $0 == other_line ) {
-			other_line_times++
-			if ( '"${IS_TERMINAL}"' ) {
-				other_line_is_repeated()
-			}
-		} else {
-			other_line_finished_repeating()
-			other_line = $0
-			other_line_times = 1
-			printf( "%s\n", original_line )
-		}
+		handle_other_line()
 	}
 
 	# Not needed when the output is a terminal, but does not hurt either.
