@@ -50,6 +50,9 @@ prettyping parameters:
   --[no]globalstats  Enable/disable the global statistics line. (default: enabled)
   --[no]recentstats  Enable/disable the "last n" statistics line. (default: enabled)
   --[no]terminal     Force the output designed to a terminal. (default: auto)
+  --[no]echoguard    Disable terminal echo while running, so stray keypresses
+                       or mouse-wheel scrolling can't corrupt the live display.
+                       (default: enabled)
   --last <n>         Use the last "n" pings at the statistics line. (default: 60)
   --columns <n>      Override auto-detection of terminal dimensions.
   --lines <n>        Override auto-detection of terminal dimensions.
@@ -78,6 +81,7 @@ parse_arguments() {
 	USE_LEGEND=1
 	USE_GLOBALSTATS=1
 	USE_RECENTSTATS=1
+	USE_ECHOGUARD=1
 
 	if [ -t 1 ]; then
 		IS_TERMINAL=1
@@ -147,6 +151,8 @@ parse_arguments() {
 			-norecentstats | --norecentstats ) USE_RECENTSTATS=0 ;;
 			-terminal      | --terminal      ) IS_TERMINAL=1 ;;
 			-noterminal    | --noterminal    ) IS_TERMINAL=0 ;;
+			-echoguard     | --echoguard     ) USE_ECHOGUARD=1 ;;
+			-noechoguard   | --noechoguard   ) USE_ECHOGUARD=0 ;;
 
 			-awkbin  | --awkbin  ) AWK_BIN="$2"  ; shift ;;
 			-pingbin | --pingbin ) PING_BIN="$2" ; shift ;;
@@ -188,6 +194,21 @@ parse_arguments "$@"
 
 
 export LC_ALL=C
+
+# Temporarily disable local echo on the controlling terminal while we run.
+# Nothing in the pipeline below ever reads from the terminal's stdin, so
+# any stray keypress (or a mouse-wheel scroll, which many terminals
+# translate into arrow-key escape sequences) would otherwise be echoed by
+# the tty driver straight into our output, landing in the middle of the
+# escape sequences used to redraw the live statistics bar in place and
+# corrupting the display.
+if [ "${IS_TERMINAL}" = 1 ] && [ "${USE_ECHOGUARD}" = 1 ] ; then
+	ORIGINAL_STTY="$( { stty -g < /dev/tty ; } 2> /dev/null )"
+	if [ -n "${ORIGINAL_STTY}" ] ; then
+		stty -echo < /dev/tty
+		trap 'stty "${ORIGINAL_STTY}" < /dev/tty' EXIT
+	fi
+fi
 
 # Warning! Ugly code ahead!
 # The code is so ugly that the comments explaining it are
